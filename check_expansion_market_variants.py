@@ -185,7 +185,7 @@ class App:
             
             if not shutil.copyfile(file_path, backup):
                 print("ERROR: Couldn't create backup file - not overwriting existing file")
-                return
+                continue
             
             print(f"Saving {file_path}")
             
