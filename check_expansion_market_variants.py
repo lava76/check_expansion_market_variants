@@ -119,7 +119,7 @@ class App:
                     self._add_issue(folder_path, file_path_rel, f"[W] '{variant_lower}' lists own variants but is a variant of '{parent_lower}'")
                     
                     if self._confirm_fix(folder_path, file_path_rel, data):
-                        variants.clear()
+                        self._update_variants(variant_lower, self.all_parents[parent_lower])
         
         if len(parents) > 1:
             for parent_lower, same_parent_count in same_parent_counts.items():
