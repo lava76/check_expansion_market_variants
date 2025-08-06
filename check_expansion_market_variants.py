@@ -70,13 +70,16 @@ class App:
         # 1) populate global arrays
         for folder_path, categories in self.folders.items():
             for file_path, data in categories.items():
+                file_path_rel = os.path.relpath(file_path, folder_path)
                 items = data.get("Items", [])
                 
-                for item in items:
+                for item in list(items):
                     parent_lower = item.get("ClassName", "").lower()
                     
                     if parent_lower in self.all_parents:
-                        # Market system deals with duplicates
+                        self._add_issue(folder_path, file_path_rel, f"[E] '{parent_lower}' in '{file_path_rel}' is a duplicate")
+                        if self._confirm_fix(folder_path, file_path_rel, data):
+                            items.remove(item)
                         continue
                     
                     self.all_parents[parent_lower] = item
