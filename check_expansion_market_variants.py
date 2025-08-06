@@ -22,6 +22,21 @@ class App:
         self.fixed_count = 0
     
     def load_items(self, folder_path):
+        for i, c in enumerate('"<>|'):
+            if c in folder_path:
+                print(f"[E] Invalid character {c} in folder path:")
+                print(f"    {folder_path}")
+                print( "   ", "-" * folder_path.index(c) + "^")
+                return False
+        
+        if not os.path.exists(folder_path):
+            print(f"[E] Path does not exist: {folder_path}")
+            return False
+        
+        if not os.path.isdir(folder_path):
+            print(f"[E] Not a directory: {folder_path}")
+            return False
+        
         print(f"Recursively looking for JSON files in: {folder_path}")
         
         for (root, dirs, files) in os.walk(folder_path):
@@ -41,6 +56,8 @@ class App:
                     self.files_count += 1
         
         print(f"Found {self.files_count} files")
+        
+        return True
     
     def process_items(self, options):
         self.options = options
@@ -239,11 +256,13 @@ class App:
                 print(f"Unknown option {arg}")
                 args.remove(arg)
         
+        result = True
+        
         if args:
             for arg in args:
-                self.load_items(arg)
+                result &= self.load_items(arg)
         else:
-            self.load_items(os.getcwd())
+            result &= self.load_items(os.getcwd())
         
         if not options["--dry-run"]:
             tmp = options.copy()
@@ -277,11 +296,15 @@ class App:
         if self.fixed_count > 0 and self.fixed_count < self.issues_count:
             self.dump_details()
         
-        self.dump_summary()
+        if result:
+            self.dump_summary()
         
         if not options["--noninteractive"]:
             print("")
             input("Press ENTER to exit")
+        
+        if not result:
+            sys.exit(1)
 
 
 if __name__ == "__main__":
