@@ -3,32 +3,34 @@ import os
 import json
 import datetime
 import shutil
+import traceback
 from collections import defaultdict
 
 
-class Issues(list):
+class Issue(str):
+    fixed = False
+
+
+class Issues(list[Issue]):
     fixed_count = 0
 
 
 class App:
-    def __init__(self):
+    def __init__(self) -> None:
         self.folders = defaultdict(dict)
+        self.categories = defaultdict(dict)
         self.files_count = 0
-        self.modified_categories = {}
+        self.modified_files = {}
         self.all_parents = {}
-        self.all_variants = defaultdict(list)
+        self.all_variants = defaultdict(list[str])
         self.issues = defaultdict(Issues)
         self.issues_count = 0
         self.fixed_count = 0
+        self.item_name_to_file_path = {}
+        self.item_name_to_data = {}
+        self.exitcode = 0
     
-    def load_items(self, folder_path):
-        for i, c in enumerate('"<>|'):
-            if c in folder_path:
-                print(f"[E] Invalid character {c} in folder path:")
-                print(f"    {folder_path}")
-                print( "   ", "-" * folder_path.index(c) + "^")
-                return False
-        
+    def load_items(self, folder_path: str) -> bool:
         if not os.path.exists(folder_path):
             print(f"[E] Path does not exist: {folder_path}")
             return False
@@ -39,10 +41,13 @@ class App:
         
         print(f"Recursively looking for JSON files in: {folder_path}")
         
+        folder_files_count = 0
+        
         for (root, dirs, files) in os.walk(folder_path):
             for filename in files:
                 if filename.lower().endswith(".json"):
                     file_path = os.path.join(root, filename)
+                    file_path_rel = os.path.relpath(file_path, folder_path)
                     
                     try:
                         with open(file_path, 'r', encoding='utf-8') as f:
@@ -52,51 +57,108 @@ class App:
                         print(f"Error processing file {file_path}: {e}")
                         continue
                     
-                    self.folders[folder_path][file_path] = data
+                    self.folders[folder_path][file_path_rel] = data
+                    category, ext = os.path.splitext(file_path_rel)
+                    self.categories[folder_path][category.lower()] = data
                     self.files_count += 1
+                    folder_files_count += 1
         
-        print(f"Found {self.files_count} files")
+        print(f"Found {folder_files_count} files")
         
         return True
     
-    def process_items(self, options):
+    def process_items(self, options: dict) -> None:
         self.options = options
         self.all_parents.clear()
         self.all_variants.clear()
         self.issues.clear()
         self.issues_count = 0
         self.fixed_count = 0
-        
+        self.item_name_to_file_path.clear()
+        self.item_name_to_data.clear()
+
+        try:
+            self._process_items()
+            
+        except Exception:
+            traceback.print_exc()
+            self.exitcode = 1
+    
+    def _process_items(self) -> None:
         # 1) populate global arrays
         for folder_path, categories in self.folders.items():
-            for file_path, data in categories.items():
-                file_path_rel = os.path.relpath(file_path, folder_path)
+            for file_path_rel, data in categories.items():
+                trader_categories = data.get("Categories")
+                
+                if trader_categories is not None:
+                    continue
+                
                 items = data.get("Items", [])
                 
                 for item in list(items):
-                    parent_lower = item.get("ClassName", "").lower()
+                    parent = item.get("ClassName", "")
                     
-                    if parent_lower in self.all_parents:
-                        self._add_issue(folder_path, file_path_rel, f"[E] '{parent_lower}' in '{file_path_rel}' is a duplicate")
+                    if not parent:
+                        self._add_issue(folder_path, file_path_rel, f"[E] Item with empty ClassName in '{file_path_rel}'")
                         if self._confirm_fix(folder_path, file_path_rel, data):
                             items.remove(item)
                         continue
                     
+                    parent_lower = parent.lower()
+                    
+                    existing = self.all_parents.get(parent_lower)
+                    
+                    if existing:
+                        if len(existing.get("Variants", [])) < len(item.get("Variants", [])) or \
+                           len(existing.get("SpawnAttachments", [])) < len(item.get("SpawnAttachments", [])):
+                            # if the existing item has less variants or attachments, remove it
+                            duplicate_data = self.item_name_to_data[parent_lower]
+                            duplicate_items = duplicate_data.get("Items", [])
+                            duplicate_file_path_rel = self.item_name_to_file_path[parent_lower]
+                            duplicate_item = existing
+                        else:
+                            duplicate_data = data
+                            duplicate_items = items
+                            duplicate_file_path_rel = file_path_rel
+                            duplicate_item = item
+                            
+                        self._add_issue(folder_path, duplicate_file_path_rel, f"[E] '{parent_lower}' is a duplicate")
+                        
+                        if self._confirm_fix(folder_path, duplicate_file_path_rel, duplicate_data):
+                            for i, tmp in enumerate(duplicate_items):
+                                if tmp is duplicate_item:
+                                    duplicate_items.pop(i)
+                                    break
+                        
+                        continue
+                    
                     self.all_parents[parent_lower] = item
+                    self.item_name_to_file_path[parent_lower] = file_path_rel
+                    self.item_name_to_data[parent_lower] = data
                     variants = item.get("Variants", [])
                     
                     for variant in variants:
                         variant_lower = variant.lower()
                         self.all_variants[variant_lower].append(parent_lower)
+                        self.item_name_to_file_path[variant_lower] = file_path_rel
+                        self.item_name_to_data[variant_lower] = data
         
         # 2) process
         for folder_path, categories in self.folders.items():
-            for file_path, data in categories.items():
-                file_path_rel = os.path.relpath(file_path, folder_path)
+            for file_path_rel, data in categories.items():
+                trader_categories = data.get("Categories")
+                
+                if trader_categories is not None:
+                    self._process_trader_categories(data, trader_categories, data.get("Items", {}), folder_path, file_path_rel)
+                    continue
+                
                 items = data.get("Items", [])
                 
+                attachments_to_add = {}
+                
                 for item in items:
-                    parent_lower = item.get("ClassName", "").lower()
+                    parent = item.get("ClassName", "")
+                    parent_lower = parent.lower()
                     variants = item.get("Variants", [])
                     
                     #self._process_item_parents(data, parent_lower, folder_path, file_path_rel)
@@ -105,10 +167,39 @@ class App:
                         variant_lower = variant.lower()
                         self._process_variant(data, item, variant_lower, self.all_variants[variant_lower], folder_path, file_path_rel)
         
+                    atts = item.get("SpawnAttachments", [])
+                    
+                    for attachment_name in list(atts):
+                        attachment_name_lower = attachment_name.lower()
+                        
+                        if attachment_name_lower not in self.all_parents and \
+                           attachment_name_lower not in self.all_variants and \
+                           attachment_name_lower not in attachments_to_add:
+                            self._add_issue(folder_path, file_path_rel, f"[E] Attachment '{attachment_name}' on {parent} does not exist in market")
+                            
+                            if self._confirm_fix(folder_path, file_path_rel, data):
+                                attachments_to_add[attachment_name_lower] = {
+                                  "ClassName": attachment_name,
+                                  "MaxPriceThreshold": 0,
+                                  "MinPriceThreshold": 0,
+                                  "SellPricePercent": 0.0,
+                                  "MaxStockThreshold": 1,
+                                  "MinStockThreshold": 1,
+                                  "QuantityPercent": -1,
+                                  "SpawnAttachments": [],
+                                  "Variants": []
+                                }
+                            else:
+                                attachments_to_add[attachment_name_lower] = None  # don't repeat the error for the same attachment
+                
+                for attachment in attachments_to_add.values():
+                    if attachment:
+                        items.append(attachment)
+        
         if self.issues_count > 0:
             print("")
     
-    def _process_item_parents(self, data, item_lower, folder_path, file_path_rel):
+    def _process_item_parents(self, data: dict, item_lower: str, folder_path: str, file_path_rel: str) -> None:
         for parent_lower in self.all_variants.get(item_lower, []):
             for parent_parent_lower in self.all_variants.get(parent_lower, []):
                 if parent_parent_lower != item_lower:
@@ -117,7 +208,7 @@ class App:
                     if self._confirm_fix(folder_path, file_path_rel, data):
                         self._update_variants(item_lower, self.all_parents[parent_lower])
     
-    def _process_variant(self, data, item, variant_lower, parents, folder_path, file_path_rel):
+    def _process_variant(self, data: dict, item: dict, variant_lower: str, parents: list[str], folder_path: str, file_path_rel: str) -> None:
         same_parent_counts = {}
         
         for parent_lower in parents:
@@ -162,31 +253,180 @@ class App:
                 
                 parents.clear()  # don't repeat the error for the same variant
     
-    def _add_issue(self, folder_path, file_path_rel, errormsg):
-        self.issues[(folder_path, file_path_rel)].append(errormsg)
+    def _process_trader_categories(self,
+                                   data: dict,
+                                   trader_categories: list[str],
+                                   trader_items: dict,
+                                   folder_path: str,
+                                   file_path_rel: str) -> None:
+        category_names_lower = []
+        
+        for trader_category in trader_categories:
+            if ":" in trader_category:
+                category_name, buy_sell = trader_category.split(":", 1)
+            else:
+                category_name, buy_sell = trader_category, 1
+            
+            category_names_lower.append(category_name.lower())
+        
+        item_names_lower = []
+        
+        for trader_item_name, buy_sell in trader_items.items():
+            item_names_lower.append(trader_item_name.lower())
+        
+        for category_name_lower in category_names_lower:
+            for category_folder_path, categories in self.categories.items():
+                category_data = categories.get(category_name_lower, {})
+                
+                if category_data.get("Categories"):
+                    continue
+                
+                items = category_data.get("Items", [])
+                
+                for item in items:
+                    self._check_add_trader_categories(item,
+                                                      1,
+                                                      False,
+                                                      False,
+                                                      0,
+                                                      category_names_lower,
+                                                      item_names_lower,
+                                                      data,
+                                                      trader_categories,
+                                                      trader_items,
+                                                      folder_path,
+                                                      file_path_rel)
+    
+    def _check_add_trader_categories(self, item: dict,
+                                     buy_sell: int,
+                                     is_variant: bool,
+                                     is_attachment: bool,
+                                     level: int,
+                                     category_names_lower: list[str],
+                                     item_names_lower: list[str],
+                                     data: dict,
+                                     trader_categories: list[str],
+                                     trader_items: dict,
+                                     folder_path: str,
+                                     file_path_rel: str) -> None:
+        variants = item.get("Variants", [])
+        
+        for variant_name in variants:
+            self._check_add_trader_category(variant_name,
+                                            buy_sell,
+                                            True,
+                                            is_attachment,
+                                            level,
+                                            category_names_lower,
+                                            item_names_lower,
+                                            data,
+                                            trader_categories,
+                                            trader_items,
+                                            folder_path,
+                                            file_path_rel)
+        
+        atts = item.get("SpawnAttachments", [])
+        
+        for attachment_name in atts:
+            attachment_name_lower = attachment_name.lower()
+            is_variant = attachment_name_lower in self.all_variants
+            self._check_add_trader_category(attachment_name,
+                                            3,
+                                            is_variant,
+                                            True,
+                                            level + 1,
+                                            category_names_lower,
+                                            item_names_lower,
+                                            data,
+                                            trader_categories,
+                                            trader_items,
+                                            folder_path,
+                                            file_path_rel)
+            att = self.all_parents.get(attachment_name_lower)
+            if att:
+                self._check_add_trader_categories(att,
+                                                  3,
+                                                  is_variant,
+                                                  True,
+                                                  level + 1,
+                                                  category_names_lower,
+                                                  item_names_lower,
+                                                  data,
+                                                  trader_categories,
+                                                  trader_items,
+                                                  folder_path,
+                                                  file_path_rel)
+    
+    def _check_add_trader_category(self, item_name: str,
+                                   buy_sell: int,
+                                   is_variant: bool,
+                                   is_attachment: bool,
+                                   level: int,
+                                   category_names_lower: list[str],
+                                   item_names_lower: list[str],
+                                   data: dict,
+                                   trader_categories: list[str],
+                                   trader_items: dict,
+                                   folder_path: str,
+                                   file_path_rel: str) -> None:
+        if not is_variant or not is_attachment:
+            return
+        
+        item_name_lower = item_name.lower()
+        
+        parents = self.all_variants[item_name_lower]
+        
+        for parent_lower in parents:
+            if parent_lower in item_names_lower:
+                return
+            
+            data_file_path_rel = self.item_name_to_file_path[parent_lower]
+            category, ext = os.path.splitext(data_file_path_rel)
+            
+            category_lower = category.lower()
+            
+            if category_lower not in category_names_lower:
+                self._add_issue(folder_path, file_path_rel, f"[E] Category '{category}' is missing from trader '{file_path_rel}'")
+                category_names_lower.append(category_lower)  # don't repeat the error for the same category
+                
+                if self._confirm_fix(folder_path, file_path_rel, data):
+                    trader_categories.append(f"{category}:{buy_sell}")
+        
+        # if item_name_lower not in item_names_lower:
+            # self._add_issue(folder_path, file_path_rel, f"[E] Item {name} in category '{category}' is missing from trader '{file_path_rel}'")
+            # item_names_lower.append(item_name_lower)  # don't repeat the error for the same item
+            
+            # if self._confirm_fix(folder_path, file_path_rel, data):
+                # trader_items[item_name_lower] = buy_sell
+    
+    def _add_issue(self, folder_path: str, file_path_rel: str, errormsg: str) -> None:
+        self.issues[(folder_path, file_path_rel)].append(Issue(errormsg))
         self.issues_count += 1
     
-    def _confirm_fix(self, folder_path, file_path_rel, data):
+    def _confirm_fix(self, folder_path: str, file_path_rel: str, data: dict) -> None:
         if self.options["--dry-run"]:
             return False
         
+        issue = list(self.issues.values())[-1][-1]
+        
         if not self.options["--noninteractive"]:
-            print(list(self.issues.values())[-1][-1])
+            print(issue)
             
             if input("Automatically fix this issue (y/n)?").lower() != "y":
                 return False
             
         else:
-            print("Fixing", list(self.issues.values())[-1][-1])
+            print("Fixing", issue)
+            issue.fixed = True
         
         file_path = os.path.join(folder_path, file_path_rel)
-        self.modified_categories[file_path] = data
+        self.modified_files[file_path] = data
         self.issues[(folder_path, file_path_rel)].fixed_count += 1
         self.fixed_count += 1
 
         return True
     
-    def _update_variants(self, variant_lower, parent, add=False):
+    def _update_variants(self, variant_lower: str, parent: dict, add: bool = False) -> None:
         variants = []
         
         for i, variant in enumerate(parent.get("Variants", [])):
@@ -196,8 +436,8 @@ class App:
         
         parent["Variants"] = variants
     
-    def save_changes(self):
-        for file_path, data in self.modified_categories.items():
+    def save_changes(self) -> None:
+        for file_path, data in self.modified_files.items():
             timestamp = datetime.datetime.fromtimestamp(os.path.getmtime(file_path)).strftime('%Y-%m-%dT%H-%M-%S')
             backup = f"{file_path}.{timestamp}.bak"
             
@@ -218,54 +458,85 @@ class App:
                 print(f"Error processing file {file_path}: {e}")
                 continue
         
-        if self.modified_categories:
+        if self.modified_files:
             print("")
-        
-    def dump_details(self):
+    
+    def dump_details(self) -> None:
         if self.issues:
             for (folder_path, file_path_rel), issues in self.issues.items():
                 if issues.fixed_count > 0:
-                    print(f"! Fixed {issues.fixed_count}/{len(issues)} issue(s) in file: {file_path_rel}")
+                    print(f"! Fixed {issues.fixed_count}/{len(issues)} issue(s) in file: {os.path.basename(folder_path)}/{file_path_rel}")
                 else:
-                    print(f"! Found {len(issues)} issue(s) in file: {file_path_rel}")
+                    print(f"! Found {len(issues)} issue(s) in file: {os.path.basename(folder_path)}/{file_path_rel}")
                 
-                for errormsg in issues:
-                    print('-', errormsg)
+                if issues.fixed_count < len(issues):
+                    for issue in issues:
+                        if not issue.fixed:
+                            print('-', issue)
                 
                 print("")
     
-    def dump_summary(self):
+    def dump_summary(self) -> None:
         if self.fixed_count > 0:
             print(f"Fixed {self.fixed_count}/{self.issues_count} issue(s) in {len(self.issues)} file(s)")
         else:
             print(f"Found {self.issues_count} issue(s) in {len(self.issues)} file(s)")
     
-    def main(self, args):
+    def main(self, args: list[str]) -> None:
         if "--help" in args:
-            print(f"Usage: {sys.argv[0]} [--noninteractive] [--dry-run] [market folder path]")
-            print("Uses current working directory if no market folder path given")
-            sys.exit()
+            print(f"Usage: {sys.argv[0]} [--noninteractive] [--dry-run] [ExpansionMod folder path]")
+            print("Uses current working directory if no folder path given")
+            sys.exit(1)
         
         options = {"--noninteractive": False,
                    "--dry-run": False}
         
-        original_args = args[:]
+        folder_paths = []
+        invalid_arg = None
         
-        for i, arg in enumerate(original_args):
+        for i, arg in enumerate(args):
             if arg in options:
                 options[arg] = True
-                args.remove(arg)
-            elif i < len(original_args) - 1:
-                print(f"Unknown option {arg}")
-                args.remove(arg)
+            else:
+                arg = arg.strip('"')
+                
+                for c in '<>|':
+                    if c in arg:
+                        print(f"[E] Invalid character {c} in argument {i+1}:")
+                        print(f"    {arg}")
+                        print( "   ", "-" * arg.index(c) + "^")
+                        invalid_arg = arg
+                        break
+                else:
+                    if os.path.isdir(arg):
+                        folder_paths.append(arg)
+                    else:
+                        print(f"Unknown option {arg}")
         
-        result = True
+        if not folder_paths and not invalid_arg:
+            folder_paths.append(os.getcwd())
         
-        if args:
-            for arg in args:
-                result &= self.load_items(arg)
-        else:
-            result &= self.load_items(os.getcwd())
+        if len(folder_paths) == 1:
+            folder_path = folder_paths[0]
+            
+            market = os.path.join(folder_path, "Market")
+            traders = os.path.join(folder_path, "Traders")
+            
+            if os.path.isdir(market):
+                folder_paths.append(market)
+            
+            if os.path.isdir(traders):
+                folder_paths.append(traders)
+            
+            if len(folder_paths) > 1:
+                folder_paths.pop(0)
+        
+        results = []
+        
+        for folder_path in folder_paths:
+            results.append(self.load_items(folder_path))
+        
+        print(f"Total {self.files_count} files")
         
         if not options["--dry-run"]:
             tmp = options.copy()
@@ -286,7 +557,7 @@ class App:
                     tmp["--dry-run"] = False
                     self.process_items(tmp)
                 else:
-                    sys.exit()
+                    sys.exit(1)
 
         else:
             self.process_items(options)
@@ -294,20 +565,23 @@ class App:
             if self.issues_count > 0 and self.fixed_count == 0:
                 self.dump_details()
         
-        self.save_changes()
-        
-        if self.fixed_count > 0 and self.fixed_count < self.issues_count:
-            self.dump_details()
-        
-        if result:
-            self.dump_summary()
-        
+        if self.exitcode == 0:
+            self.save_changes()
+            
+            if self.fixed_count < self.issues_count:
+                self.dump_details()
+            
+            if any(results):
+                self.dump_summary()
+            
         if not options["--noninteractive"]:
             print("")
             input("Press ENTER to exit")
         
-        if not result:
+        if not results or not all(results):
             sys.exit(1)
+        
+        sys.exit(self.exitcode)
 
 
 if __name__ == "__main__":
