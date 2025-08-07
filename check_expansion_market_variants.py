@@ -1,3 +1,15 @@
+#!/usr/bin/env python
+
+"""check_expansion_market_variants
+
+Checks and optionally fixes Expansion Market and Traders configuration JSON files.
+"""
+
+__author__ = "lava76"
+__version__ = "1.1.0"
+__license__ = "GPL-3.0-or-later"
+
+
 import sys
 import os
 import json
