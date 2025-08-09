@@ -317,7 +317,7 @@ class App:
                         f"[E] '{parent_lower}' lists variant '{variant_lower}' {same_parent_count} times",
                     )
 
-                    while same_parent_count:
+                    while same_parent_count > 1:
                         parents.remove(
                             parent_lower
                         )  # don't repeat the error for the same variant
@@ -328,7 +328,7 @@ class App:
                             variant_lower, self.all_parents[parent_lower], True
                         )
 
-            if parents:
+            if len(parents) > 1:
                 self._add_issue(
                     folder_path,
                     file_path_rel,
@@ -341,7 +341,7 @@ class App:
                             variant_lower, self.all_parents[parent_lower]
                         )
 
-                parents.clear()  # don't repeat the error for the same variant
+                parents[1:] = []  # don't repeat the error for the same variant
 
     def _process_trader_categories(
         self,
