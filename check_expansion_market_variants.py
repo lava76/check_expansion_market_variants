@@ -18,6 +18,16 @@ import shutil
 import traceback
 from collections import defaultdict
 
+try:
+    from anyascii import anyascii
+except ImportError:
+    print(
+        "WARNING: Could not import anyascii module! Use `pip install anyascii` to install"
+    )
+
+    def anyascii(s: str) -> str:
+        return s
+
 
 class Issue(str):
     fixed = False
@@ -109,6 +119,13 @@ class App:
 
                 for item in list(items):
                     parent = item.get("ClassName", "")
+                    decoded = self._fix_nonascii(
+                        data, parent, folder_path, file_path_rel
+                    )
+
+                    if decoded != parent:
+                        parent = decoded
+                        item["ClassName"] = parent
 
                     if not parent:
                         self._add_issue(
@@ -162,13 +179,27 @@ class App:
                     self.all_parents[parent_lower] = item
                     self.item_name_to_file_path[parent_lower] = file_path_rel
                     self.item_name_to_data[parent_lower] = data
-                    variants = item.get("Variants", [])
+                    variants_orig = item.get("Variants", [])
 
-                    for variant in variants:
+                    variants = []
+
+                    for variant in variants_orig:
+                        decoded = self._fix_nonascii(
+                            data, variant, folder_path, file_path_rel
+                        )
+
+                        if decoded != variant:
+                            variant = decoded
+
+                        variants.append(variant)
+
                         variant_lower = variant.lower()
                         self.all_variants[variant_lower].append(parent_lower)
                         self.item_name_to_file_path[variant_lower] = file_path_rel
                         self.item_name_to_data[variant_lower] = data
+
+                    if variants != variants_orig:
+                        item["Variants"] = variants
 
         # 2) process
         for folder_path, categories in self.folders.items():
@@ -207,9 +238,20 @@ class App:
                             file_path_rel,
                         )
 
-                    atts = item.get("SpawnAttachments", [])
+                    atts_orig = item.get("SpawnAttachments", [])
 
-                    for attachment_name in list(atts):
+                    atts = []
+
+                    for attachment_name in atts_orig:
+                        decoded = self._fix_nonascii(
+                            data, attachment_name, folder_path, file_path_rel
+                        )
+
+                        if decoded != attachment_name:
+                            attachment_name = decoded
+
+                        atts.append(attachment_name)
+
                         attachment_name_lower = attachment_name.lower()
 
                         if (
@@ -240,12 +282,31 @@ class App:
                                     None  # don't repeat the error for the same attachment
                                 )
 
+                    if atts != atts_orig:
+                        item["SpawnAttachments"] = atts
+
                 for attachment in attachments_to_add.values():
                     if attachment:
                         items.append(attachment)
 
         if self.issues_count > 0:
             print("")
+
+    def _fix_nonascii(
+        self, data: dict, name: str, folder_path: str, file_path_rel: str
+    ) -> str:
+        decoded = anyascii(name)
+
+        if decoded != name:
+            self._add_issue(
+                folder_path,
+                file_path_rel,
+                f"[E] Non-ASCII characters in '{name}'",
+            )
+            if self._confirm_fix(folder_path, file_path_rel, data):
+                return decoded
+
+        return name
 
     def _process_item_parents(
         self, data: dict, item_lower: str, folder_path: str, file_path_rel: str
