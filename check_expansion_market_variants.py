@@ -700,7 +700,29 @@ class App:
                         print(f"Unknown option {arg}")
 
         if not folder_paths and not invalid_arg:
-            folder_paths.append(os.getcwd())
+            cwd = os.getcwd()
+            if os.path.basename(cwd).lower() in (
+                "expansionmod",
+                "market",
+                "traders",
+            ):
+                folder_paths.append(cwd)
+
+        if not options["--noninteractive"]:
+            while not folder_paths:
+                print("Drag & drop ExpansionMod folder here, then press ENTER")
+                folder_path = input()
+
+                if not folder_path:
+                    sys.exit(1)
+
+                folder_path = folder_path.strip().strip('"')
+
+                if os.path.isdir(folder_path):
+                    folder_paths.append(folder_path)
+                    break
+                else:
+                    print("Not a valid folder path!")
 
         if len(folder_paths) == 1:
             folder_path = folder_paths[0]
