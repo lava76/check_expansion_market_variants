@@ -726,22 +726,36 @@ class App:
 
         if len(folder_paths) == 1:
             folder_path = folder_paths[0]
+            folder_name_lower = os.path.basename(folder_path).lower()
 
-            market = os.path.join(folder_path, "Market")
-            traders = os.path.join(folder_path, "Traders")
+            if folder_name_lower == "market":
+                trader_folder_path = os.path.abspath(os.path.join(folder_path, "..", "Traders"))
 
-            if os.path.isdir(market):
-                folder_paths.append(market)
+                if os.path.isdir(trader_folder_path):
+                    folder_paths.append(trader_folder_path)
 
-            if os.path.isdir(traders):
-                folder_paths.append(traders)
+            elif folder_name_lower == "traders":
+                market_folder_path = os.path.abspath(os.path.join(folder_path, "..", "Market"))
 
-            if len(folder_paths) > 1:
-                folder_paths.pop(0)
+                if os.path.isdir(market_folder_path):
+                    folder_paths.append(market_folder_path)
+
+            else:
+                market = os.path.join(folder_path, "Market")
+                traders = os.path.join(folder_path, "Traders")
+
+                if os.path.isdir(market):
+                    folder_paths.append(market)
+
+                if os.path.isdir(traders):
+                    folder_paths.append(traders)
+
+                if len(folder_paths) > 1:
+                    folder_paths.pop(0)
 
         results = []
 
-        for folder_path in folder_paths:
+        for folder_path in sorted(folder_paths):
             results.append(self.load_items(folder_path))
 
         print(f"Total {self.files_count} files")
