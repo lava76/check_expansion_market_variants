@@ -15,12 +15,12 @@ VSVersionInfo(
         '040904B0',
         [StringStruct('CompanyName', 'Expansion Mods'),
         StringStruct('FileDescription', 'Checks and optionally fixes Expansion Market and Traders configuration JSON files.'),
-        StringStruct('FileVersion', '1.1.0'),
+        StringStruct('FileVersion', '1.1.1'),
         StringStruct('InternalName', 'check_expansion_market_variants'),
         StringStruct('LegalCopyright', '© 2025 lava76'),
         StringStruct('OriginalFilename', 'check_expansion_market_variants.exe'),
         StringStruct('ProductName', 'Expansion Market Configuration Checker'),
-        StringStruct('ProductVersion', '1.1.0')])
+        StringStruct('ProductVersion', '1.1.1')])
       ]),
     VarFileInfo([VarStruct('Translation', [1033, 1200])])
   ]
