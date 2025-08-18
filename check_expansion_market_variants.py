@@ -6,7 +6,7 @@ Checks and optionally fixes Expansion Market and Traders configuration JSON file
 """
 
 __author__ = "lava76"
-__version__ = "1.1.1"
+__version__ = "1.1.2"
 __license__ = "GPL-3.0-or-later"
 
 
