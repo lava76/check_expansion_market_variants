@@ -119,15 +119,8 @@ class App:
 
                 for item in list(items):
                     parent = item.get("ClassName", "")
-                    decoded = self._fix_nonascii(
-                        data, parent, folder_path, file_path_rel
-                    )
 
-                    if decoded != parent:
-                        parent = decoded
-                        item["ClassName"] = parent
-
-                    if not parent:
+                    if not parent.strip():
                         self._add_issue(
                             folder_path,
                             file_path_rel,
@@ -136,6 +129,14 @@ class App:
                         if self._confirm_fix(folder_path, file_path_rel, data):
                             items.remove(item)
                         continue
+
+                    decoded = self._fix_nonascii(
+                        data, parent, folder_path, file_path_rel
+                    )
+
+                    if decoded != parent:
+                        parent = decoded
+                        item["ClassName"] = parent
 
                     parent_lower = parent.lower()
 
@@ -184,6 +185,15 @@ class App:
                     variants = []
 
                     for variant in variants_orig:
+                        if not variant.strip():
+                            self._add_issue(
+                                folder_path,
+                                file_path_rel,
+                                f"[E] Empty variant for item `{parent}` in '{file_path_rel}'",
+                            )
+                            if self._confirm_fix(folder_path, file_path_rel, data):
+                                continue
+
                         decoded = self._fix_nonascii(
                             data, variant, folder_path, file_path_rel
                         )
@@ -243,6 +253,15 @@ class App:
                     atts = []
 
                     for attachment_name in atts_orig:
+                        if not attachment_name.strip():
+                            self._add_issue(
+                                folder_path,
+                                file_path_rel,
+                                f"[E] Empty attachment for item `{parent}` in '{file_path_rel}'",
+                            )
+                            if self._confirm_fix(folder_path, file_path_rel, data):
+                                continue
+
                         decoded = self._fix_nonascii(
                             data, attachment_name, folder_path, file_path_rel
                         )
@@ -729,13 +748,17 @@ class App:
             folder_name_lower = os.path.basename(folder_path).lower()
 
             if folder_name_lower == "market":
-                trader_folder_path = os.path.abspath(os.path.join(folder_path, "..", "Traders"))
+                trader_folder_path = os.path.abspath(
+                    os.path.join(folder_path, "..", "Traders")
+                )
 
                 if os.path.isdir(trader_folder_path):
                     folder_paths.append(trader_folder_path)
 
             elif folder_name_lower == "traders":
-                market_folder_path = os.path.abspath(os.path.join(folder_path, "..", "Market"))
+                market_folder_path = os.path.abspath(
+                    os.path.join(folder_path, "..", "Market")
+                )
 
                 if os.path.isdir(market_folder_path):
                     folder_paths.append(market_folder_path)
