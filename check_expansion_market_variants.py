@@ -441,9 +441,26 @@ class App:
 
             category_names_lower.append(category_name.lower())
 
+        trader_items_copy = trader_items.copy()
         item_names_lower = []
 
-        for trader_item_name, buy_sell in trader_items.items():
+        for trader_item_name, buy_sell in trader_items_copy.items():
+            item_name_lower = trader_item_name.lower()
+
+            if (
+                item_name_lower not in self.all_parents
+                and item_name_lower not in self.all_variants
+            ):
+                self._add_issue(
+                    folder_path,
+                    file_path_rel,
+                    f"[E] Item '{trader_item_name}' does not exist in market",
+                )
+
+                if self._confirm_fix(folder_path, file_path_rel, data):
+                    trader_items.pop(trader_item_name)
+                    continue
+
             item_names_lower.append(trader_item_name.lower())
 
         for category_name_lower in category_names_lower:
