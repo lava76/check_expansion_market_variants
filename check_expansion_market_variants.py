@@ -917,11 +917,20 @@ class App:
 
         print(f"Total {self.files_count} files")
 
+        issues = defaultdict(Issues)
+        issues_count = 0
+
         if not options["--dry-run"]:
             tmp = options.copy()
             tmp["--dry-run"] = True
 
             self.process_items(tmp)
+
+            for key, values in self.issues.items():
+                for issue in values:
+                    issues[key].append(issue)
+
+            issues_count = self.issues_count
 
             if self.issues_count > 0:
                 self.dump_details()
@@ -943,6 +952,25 @@ class App:
 
             if self.issues_count > 0 and self.fixed_count == 0:
                 self.dump_details()
+
+        # do additional passes if not all originally detected issues were fixed
+        # TODO should probably try and figure out why corner cases exist were
+        # not all issues are fixed in one pass
+        if issues_count > self.fixed_count:
+            self.issues_count = issues_count
+            self.dump_summary()
+
+            print("WARNING: Not all issues fixed in 1st pass")
+
+            tmp["--noninteractive"] = True
+
+            while self.fixed_count > 0:
+                print("Doing additional pass...")
+                self.process_items(tmp)
+
+            self.issues = issues
+            self.issues_count = issues_count
+            self.fixed_count = issues_count
 
         if self.exitcode == 0:
             if not options["--dry-run"]:
