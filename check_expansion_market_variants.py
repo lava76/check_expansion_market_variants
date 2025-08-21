@@ -30,11 +30,23 @@ except ImportError:
 
 
 class Issue(str):
+    critical = False
     fixed = False
 
 
 class Issues(list[Issue]):
     fixed_count = 0
+
+
+class IssuesDict(defaultdict[Issues]):
+    def clear_noncritical(self):
+        for key, issues in self.copy().items():
+            for issue in list(issues):
+                if not issue.critical:
+                    issues.remove(issue)
+
+            if not issues:
+                self.pop(key)
 
 
 class App:
@@ -45,7 +57,7 @@ class App:
         self.modified_files = {}
         self.all_parents = {}
         self.all_variants = defaultdict(list[str])
-        self.issues = defaultdict(Issues)
+        self.issues = IssuesDict(Issues)
         self.issues_count = 0
         self.fixed_count = 0
         self.item_name_to_file_path = {}
@@ -93,7 +105,7 @@ class App:
         self.options = options
         self.all_parents.clear()
         self.all_variants.clear()
-        self.issues.clear()
+        self.issues.clear_noncritical()
         self.issues_count = 0
         self.fixed_count = 0
         self.item_name_to_file_path.clear()
@@ -110,6 +122,17 @@ class App:
         # 1) populate global arrays
         for folder_path, categories in self.folders.items():
             for file_path_rel, data in categories.items():
+                if type(data) is not dict:
+                    self._add_issue(
+                        folder_path,
+                        file_path_rel,
+                        f"[E] CRITICAL: Data {i} in '{file_path_rel}' is not a JSON object. Removing.",
+                        critical=True,
+                    )
+                    self._fix(folder_path, file_path_rel, data)
+                    data.clear()
+                    continue
+
                 trader_categories = data.get("Categories")
 
                 if trader_categories is not None:
@@ -117,7 +140,42 @@ class App:
 
                 items = data.get("Items", [])
 
-                for item in list(items):
+                if type(items) is not list:
+                    self._add_issue(
+                        folder_path,
+                        file_path_rel,
+                        f"[E] CRITICAL: Items in '{file_path_rel}' is not a JSON list. Removing.",
+                        critical=True,
+                    )
+                    self._fix(folder_path, file_path_rel, data)
+                    data["Items"] = []
+                    continue
+
+                if len(items) > 0:
+                    item = items[0]
+
+                    if type(item) is list and len(item) > 0 and type(item[0]) is dict:
+                        self._add_issue(
+                            folder_path,
+                            file_path_rel,
+                            f"[E] CRITICAL: Items in '{file_path_rel}' are improperly nested.",
+                        )
+                        self._fix(folder_path, file_path_rel, data)
+                        items = item
+                        data["Items"] = items
+
+                for i, item in enumerate(list(items)):
+                    if type(item) is not dict:
+                        self._add_issue(
+                            folder_path,
+                            file_path_rel,
+                            f"[E] CRITICAL: Item {i} in '{file_path_rel}' is not a JSON object. Removing.",
+                            critical=True,
+                        )
+                        self._fix(folder_path, file_path_rel, data)
+                        items.remove(item)
+                        continue
+
                     parent = item.get("ClassName", "")
 
                     if not parent.strip():
@@ -140,14 +198,38 @@ class App:
 
                     parent_lower = parent.lower()
 
+                    variants_orig = item.get("Variants", [])
+
+                    if type(variants_orig) is not list:
+                        self._add_issue(
+                            folder_path,
+                            file_path_rel,
+                            f"[E] CRITICAL: Variants of item {parent} in '{file_path_rel}' is not a JSON list. Removing.",
+                            critical=True,
+                        )
+                        self._fix(folder_path, file_path_rel, data)
+                        variants_orig.clear()
+                        continue
+
+                    atts_orig = item.get("SpawnAttachments", [])
+
+                    if type(atts_orig) is not list:
+                        self._add_issue(
+                            folder_path,
+                            file_path_rel,
+                            f"[E] CRITICAL: Attachments of item {parent} in '{file_path_rel}' is not a JSON list. Removing.",
+                            critical=True,
+                        )
+                        self._fix(folder_path, file_path_rel, data)
+                        atts_orig.clear()
+                        continue
+
                     existing = self.all_parents.get(parent_lower)
 
                     if existing:
                         if len(existing.get("Variants", [])) < len(
-                            item.get("Variants", [])
-                        ) or len(existing.get("SpawnAttachments", [])) < len(
-                            item.get("SpawnAttachments", [])
-                        ):
+                            variants_orig
+                        ) or len(existing.get("SpawnAttachments", [])) < len(atts_orig):
                             # if the existing item has less variants or attachments, remove it
                             duplicate_data = self.item_name_to_data[parent_lower]
                             duplicate_items = duplicate_data.get("Items", [])
@@ -180,7 +262,6 @@ class App:
                     self.all_parents[parent_lower] = item
                     self.item_name_to_file_path[parent_lower] = file_path_rel
                     self.item_name_to_data[parent_lower] = data
-                    variants_orig = item.get("Variants", [])
 
                     variants = []
 
@@ -608,11 +689,19 @@ class App:
         # if self._confirm_fix(folder_path, file_path_rel, data):
         # trader_items[item_name_lower] = buy_sell
 
-    def _add_issue(self, folder_path: str, file_path_rel: str, errormsg: str) -> None:
-        self.issues[(folder_path, file_path_rel)].append(Issue(errormsg))
+    def _add_issue(
+        self,
+        folder_path: str,
+        file_path_rel: str,
+        errormsg: str,
+        critical: bool = False,
+    ) -> None:
+        issue = Issue(errormsg)
+        issue.critical = critical
+        self.issues[(folder_path, file_path_rel)].append(issue)
         self.issues_count += 1
 
-    def _confirm_fix(self, folder_path: str, file_path_rel: str, data: dict) -> None:
+    def _confirm_fix(self, folder_path: str, file_path_rel: str, data: dict) -> bool:
         if self.options["--dry-run"]:
             return False
 
@@ -628,12 +717,17 @@ class App:
             print("Fixing", issue)
             issue.fixed = True
 
-        file_path = os.path.join(folder_path, file_path_rel)
-        self.modified_files[file_path] = data
-        self.issues[(folder_path, file_path_rel)].fixed_count += 1
-        self.fixed_count += 1
+        self._fix(folder_path, file_path_rel, data)
 
         return True
+
+    def _fix(self, folder_path: str, file_path_rel: str, data: dict) -> None:
+        file_path = os.path.join(folder_path, file_path_rel)
+        self.modified_files[file_path] = data
+
+        if not self.options["--dry-run"]:
+            self.issues[(folder_path, file_path_rel)].fixed_count += 1
+            self.fixed_count += 1
 
     def _update_variants(
         self, variant_lower: str, parent: dict, add: bool = False
@@ -828,7 +922,8 @@ class App:
                 self.dump_details()
 
         if self.exitcode == 0:
-            self.save_changes()
+            if not options["--dry-run"]:
+                self.save_changes()
 
             if self.fixed_count < self.issues_count:
                 self.dump_details()
