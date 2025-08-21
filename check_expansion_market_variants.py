@@ -294,6 +294,8 @@ class App:
 
         # 2) process
         for folder_path, categories in self.folders.items():
+            attachments_to_add = {}
+
             for file_path_rel, data in categories.items():
                 trader_categories = data.get("Categories")
 
@@ -308,8 +310,6 @@ class App:
                     continue
 
                 items = data.get("Items", [])
-
-                attachments_to_add = {}
 
                 for item in items:
                     parent = item.get("ClassName", "")
@@ -385,9 +385,31 @@ class App:
                     if atts != atts_orig:
                         item["SpawnAttachments"] = atts
 
+            if attachments_to_add:
+                items = []
+                data = {
+                    "m_Version": 12,
+                    "DisplayName": "Missing attachments added by Expansion Market and Trader configuration checker (https://github.com/lava76/check_expansion_market_variants)",
+                    "Icon": "",
+                    "Color": "",
+                    "IsExchange": 0,
+                    "InitStockPercent": 75,
+                    "Items": items,
+                }
+
                 for attachment in attachments_to_add.values():
                     if attachment:
                         items.append(attachment)
+
+                num = 1
+                while True:
+                    file_path_rel = f"Missing_Attachments_{num}.json"
+                    file_path = os.path.join(folder_path, file_path_rel)
+                    if not os.path.exists(file_path):
+                        categories[file_path_rel] = data
+                        self.modified_files[file_path] = data
+                        break
+                    num += 1
 
         if self.issues_count > 0:
             print("")
@@ -743,18 +765,19 @@ class App:
 
     def save_changes(self) -> None:
         for file_path, data in self.modified_files.items():
-            timestamp = datetime.datetime.fromtimestamp(
-                os.path.getmtime(file_path)
-            ).strftime("%Y-%m-%dT%H-%M-%S")
-            backup = f"{file_path}.{timestamp}.bak"
+            if os.path.exists(file_path):
+                timestamp = datetime.datetime.fromtimestamp(
+                    os.path.getmtime(file_path)
+                ).strftime("%Y-%m-%dT%H-%M-%S")
+                backup = f"{file_path}.{timestamp}.bak"
 
-            print(f"Creating backup {backup}")
+                print(f"Creating backup {backup}")
 
-            if not shutil.copyfile(file_path, backup):
-                print(
-                    "ERROR: Couldn't create backup file - not overwriting existing file"
-                )
-                continue
+                if not shutil.copyfile(file_path, backup):
+                    print(
+                        "ERROR: Couldn't create backup file - not overwriting existing file"
+                    )
+                    continue
 
             print(f"Saving {file_path}")
 
