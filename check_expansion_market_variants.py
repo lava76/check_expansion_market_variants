@@ -116,7 +116,12 @@ class App:
 
         except Exception:
             traceback.print_exc()
-            self.exitcode = 1
+
+            if not options["--noninteractive"]:
+                print("")
+                input("Press ENTER to exit")
+
+            sys.exit(1)
 
     def _process_items(self) -> None:
         # 1) populate global arrays
