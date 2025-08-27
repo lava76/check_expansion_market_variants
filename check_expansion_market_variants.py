@@ -840,6 +840,22 @@ class App:
             print(f"Found {self.issues_count} issue(s) in {len(self.issues)} file(s)")
 
     def main(self, args: list[str]) -> None:
+        # https://docs.python.org/3/library/signal.html#note-on-sigpipe
+        try:
+            self._main(args)
+
+            # flush output here to force SIGPIPE to be triggered
+            # while inside this try block.
+            sys.stdout.flush()
+
+        except BrokenPipeError:
+            # Python flushes standard streams on exit; redirect remaining output
+            # to devnull to avoid another BrokenPipeError at shutdown
+            devnull = os.open(os.devnull, os.O_WRONLY)
+            os.dup2(devnull, sys.stdout.fileno())
+            sys.exit(1)  # Python exits with error code 1 on EPIPE
+
+    def _main(self, args: list[str]) -> None:
         if "--help" in args:
             print(
                 f"Usage: {sys.argv[0]} [--noninteractive] [--dry-run] [ExpansionMod folder path]"
