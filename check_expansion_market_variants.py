@@ -868,7 +868,7 @@ class App:
             print("Uses current working directory if no folder path given")
             sys.exit(1)
 
-        options = {"--noninteractive": False, "--dry-run": False}
+        options = {"--noninteractive": not sys.stdout.isatty(), "--dry-run": False}
 
         folder_paths = []
         invalid_arg = None
