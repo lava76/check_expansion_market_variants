@@ -101,7 +101,7 @@ class App:
 
         return True
 
-    def process_items(self, options: dict) -> None:
+    def process_items(self, options: dict) -> tuple[defaultdict[Issues], int]:
         self.options = options
         self.all_parents.clear()
         self.all_variants.clear()
@@ -122,6 +122,14 @@ class App:
                 input("Press ENTER to exit")
 
             sys.exit(1)
+
+        issues = defaultdict(Issues)
+
+        for key, values in self.issues.items():
+            for issue in values:
+                issues[key].append(issue)
+
+        return (issues, self.issues_count)
 
     def _process_items(self) -> None:
         # 1) populate global arrays
@@ -957,20 +965,11 @@ class App:
 
         print(f"Total {self.files_count} files")
 
-        issues = defaultdict(Issues)
-        issues_count = 0
-
-        if not options["--dry-run"]:
+        if not options["--noninteractive"] and not options["--dry-run"]:
             tmp = options.copy()
             tmp["--dry-run"] = True
 
-            self.process_items(tmp)
-
-            for key, values in self.issues.items():
-                for issue in values:
-                    issues[key].append(issue)
-
-            issues_count = self.issues_count
+            issues, issues_count = self.process_items(tmp)
 
             if self.issues_count > 0:
                 self.dump_details()
@@ -978,7 +977,6 @@ class App:
 
                 print("")
 
-        if not options["--noninteractive"]:
             if self.issues_count > 0:
                 if input("Automatically fix these issues (y/n)?").lower() == "y":
                     tmp["--noninteractive"] = True
@@ -988,7 +986,7 @@ class App:
                     sys.exit(1)
 
         else:
-            self.process_items(options)
+            issues, issues_count = self.process_items(options)
 
             if self.issues_count > 0 and self.fixed_count == 0:
                 self.dump_details()
@@ -996,7 +994,7 @@ class App:
         # do additional passes if not all originally detected issues were fixed
         # TODO should probably try and figure out why corner cases exist were
         # not all issues are fixed in one pass
-        if issues_count > self.fixed_count:
+        if not options["--dry-run"] and issues_count > self.fixed_count:
             self.issues_count = issues_count
             self.dump_summary()
 
@@ -1016,7 +1014,7 @@ class App:
             if not options["--dry-run"]:
                 self.save_changes()
 
-            if self.fixed_count < self.issues_count:
+            if not options["--dry-run"] and self.fixed_count < self.issues_count:
                 self.dump_details()
 
             if any(results):
