@@ -286,8 +286,6 @@ class App:
 
                         variant_lower = variant.lower()
                         self.all_variants[variant_lower].append(parent_lower)
-                        self.item_name_to_file_path[variant_lower] = file_path_rel
-                        self.item_name_to_data[variant_lower] = data
 
                     if variants != variants_orig:
                         item["Variants"] = variants
@@ -526,6 +524,24 @@ class App:
 
                 parents[1:] = []  # don't repeat the error for the same variant
 
+        if parents:
+            variant_file_path_rel = self.item_name_to_file_path.get(variant_lower)
+            if variant_file_path_rel and variant_file_path_rel != file_path_rel:
+                self._add_issue(
+                    folder_path,
+                    file_path_rel,
+                    f"[E] Variant '{variant_lower}' of '{parents[0]}' is in a different category '{variant_file_path_rel}'",
+                )
+
+                if self._confirm_fix(folder_path, file_path_rel, data):
+                    # remove variant from category where it was originally defined and add to this category
+                    variant_data = self.item_name_to_data[variant_lower]
+                    variant = self.all_parents[variant_lower]
+                    variant_data["Items"].remove(variant)
+                    self._fix(folder_path, variant_file_path_rel, variant_data)
+                    data["Items"].append(variant)
+                    # self._update_variants(variant_lower, item)
+
     def _process_trader_categories(
         self,
         data: dict,
@@ -748,8 +764,11 @@ class App:
         self.modified_files[file_path] = data
 
         if not self.options["--dry-run"]:
-            self.issues[(folder_path, file_path_rel)].fixed_count += 1
-            self.fixed_count += 1
+            key = (folder_path, file_path_rel)
+            issues = self.issues.get(key)
+            if issues:
+                issues.fixed_count += 1
+                self.fixed_count += 1
 
     def _update_variants(
         self, variant_lower: str, parent: dict, add: bool = False
