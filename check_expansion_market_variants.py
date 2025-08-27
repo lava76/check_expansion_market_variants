@@ -139,7 +139,7 @@ class App:
                     self._add_issue(
                         folder_path,
                         file_path_rel,
-                        f"[E] CRITICAL: Data {i} in '{file_path_rel}' is not a JSON object. Removing.",
+                        f"[E] CRITICAL: Data in '{file_path_rel}' is not a JSON object. Removing.",
                         critical=True,
                     )
                     self._fix(folder_path, file_path_rel, data)
