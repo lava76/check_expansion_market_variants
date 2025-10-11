@@ -50,6 +50,10 @@ class IssuesDict(defaultdict[Issues]):
 
 
 class App:
+    CLASSNAME_ALPHABET = (
+        "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz"
+    )
+
     def __init__(self) -> None:
         self.folders = defaultdict(dict)
         self.categories = defaultdict(dict)
@@ -201,7 +205,7 @@ class App:
                             items.remove(item)
                         continue
 
-                    decoded = self._fix_nonascii(
+                    decoded = self._fix_invalid_classname(
                         data, parent, folder_path, file_path_rel
                     )
 
@@ -288,7 +292,7 @@ class App:
                             if self._confirm_fix(folder_path, file_path_rel, data):
                                 continue
 
-                        decoded = self._fix_nonascii(
+                        decoded = self._fix_invalid_classname(
                             data, variant, folder_path, file_path_rel
                         )
 
@@ -354,7 +358,7 @@ class App:
                             if self._confirm_fix(folder_path, file_path_rel, data):
                                 continue
 
-                        decoded = self._fix_nonascii(
+                        decoded = self._fix_invalid_classname(
                             data, attachment_name, folder_path, file_path_rel
                         )
 
@@ -425,10 +429,33 @@ class App:
         if self.issues_count > 0:
             print("")
 
-    def _fix_nonascii(
+    def _fix_invalid_classname(
         self, data: dict, name: str, folder_path: str, file_path_rel: str
     ) -> str:
         decoded = anyascii(name)
+
+        sanitized_name = ""
+
+        for i, c in enumerate(decoded):
+            if not c in App.CLASSNAME_ALPHABET:
+                indicator = "-" * i + "^"
+                print(f"! File: {os.path.basename(folder_path)}/{file_path_rel}")
+                print(f"[E] Invalid character at position {i + 1}:")
+                print(f"    {name}")
+                print(f"    {indicator}")
+                sanitized_name += "_"
+            else:
+                sanitized_name += c
+
+        if sanitized_name != decoded:
+            indicator = "-" * i
+            self._add_issue(
+                folder_path,
+                file_path_rel,
+                f"[E] CRITICAL: Invalid character(s) in '{name}'",
+            )
+            if self._confirm_fix(folder_path, file_path_rel, data):
+                return sanitized_name
 
         if decoded != name:
             self._add_issue(
